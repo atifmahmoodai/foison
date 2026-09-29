@@ -47,13 +47,31 @@ export const ALLOWED_MEDIA_TYPES = ["image/jpeg", "image/png", "image/webp"] as 
 
 /** Claude accepts images up to 5 MB each. */
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** A long receipt arrives as several photos and/or on-device slices of one tall photo. */
+export const MAX_IMAGES = 12;
+/** Keeps the whole Claude request well under its 32 MB limit. */
+export const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
 
-export const ParseRequestSchema = z.object({
+const decodedBytes = (b64: string) => Math.floor((b64.length * 3) / 4);
+
+const ImageSchema = z.object({
   imageBase64: z
     .string()
     .regex(/^[A-Za-z0-9+/]+={0,2}$/, "imageBase64 must be raw base64 without a data: prefix")
-    .refine((b64) => Math.floor((b64.length * 3) / 4) <= MAX_IMAGE_BYTES, "Image is larger than 5 MB"),
+    .refine((b64) => decodedBytes(b64) <= MAX_IMAGE_BYTES, "Each image must be 5 MB or smaller"),
   mediaType: z.enum(ALLOWED_MEDIA_TYPES),
+});
+
+export const ParseRequestSchema = z.object({
+  /** In top-to-bottom order. Consecutive images may overlap. */
+  images: z
+    .array(ImageSchema)
+    .min(1, "Send at least one image")
+    .max(MAX_IMAGES, `Send at most ${MAX_IMAGES} images`)
+    .refine(
+      (images) => images.reduce((sum, i) => sum + decodedBytes(i.imageBase64), 0) <= MAX_TOTAL_IMAGE_BYTES,
+      "Images are larger than 20 MB in total",
+    ),
 });
 
 export type ParseRequest = z.infer<typeof ParseRequestSchema>;

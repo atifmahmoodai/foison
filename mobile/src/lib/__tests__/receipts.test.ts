@@ -5,7 +5,10 @@ import { syncReceipt } from "../sync";
 import type { ExtractedReceipt } from "../types";
 
 jest.mock("../db", () => ({ insertReceipt: jest.fn(), deleteReceipt: jest.fn(), getReceipt: jest.fn() }));
-jest.mock("../image", () => ({ persistReceiptImage: jest.fn(() => "file:///doc/r.jpg"), deleteReceiptImage: jest.fn() }));
+jest.mock("../image", () => ({
+  persistReceiptImage: jest.fn((_uri: string, id: string, page: number) => `file:///doc/${id}-${page}.jpg`),
+  deleteReceiptImage: jest.fn(),
+}));
 jest.mock("../sync", () => ({ syncReceipt: jest.fn(() => Promise.resolve(true)) }));
 jest.mock("expo-crypto", () => {
   let n = 0;
@@ -77,15 +80,16 @@ describe("validateDraft", () => {
 
 describe("saveDraft", () => {
   it("stores the receipt locally then syncs it", async () => {
-    const id = await saveDraft(draftFromExtraction(extracted), "file:///cache/x.jpg");
+    const id = await saveDraft(draftFromExtraction(extracted), ["file:///cache/a.jpg", "file:///cache/b.jpg"]);
     const saved = (insertReceipt as jest.Mock).mock.calls[0][0];
-    expect(saved).toMatchObject({ id, subtotal: 3.5, total: 3.78, syncStatus: "pending", imageUri: "file:///doc/r.jpg" });
+    expect(saved).toMatchObject({ id, subtotal: 3.5, total: 3.78, syncStatus: "pending" });
+    expect(saved.imageUris).toEqual([`file:///doc/${id}-0.jpg`, `file:///doc/${id}-1.jpg`]);
     expect(syncReceipt).toHaveBeenCalledWith(id);
   });
 
-  it("removes the copied photo if the database write fails", async () => {
+  it("removes the copied photos if the database write fails", async () => {
     (insertReceipt as jest.Mock).mockRejectedValueOnce(new Error("disk full"));
-    await expect(saveDraft(draftFromExtraction(extracted), "file:///cache/x.jpg")).rejects.toThrow("disk full");
-    expect(deleteReceiptImage).toHaveBeenCalledWith("file:///doc/r.jpg");
+    await expect(saveDraft(draftFromExtraction(extracted), ["file:///cache/a.jpg", "file:///cache/b.jpg"])).rejects.toThrow("disk full");
+    expect(deleteReceiptImage).toHaveBeenCalledTimes(2);
   });
 });

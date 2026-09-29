@@ -35,9 +35,9 @@ export function createApp({ verifyToken, extract, limiter }: Deps) {
 
   app.post(
     "/v1/receipts/parse",
-    // base64 inflates by 4/3, plus JSON overhead
+    // 20 MB of images inflates to ~27 MB as base64, plus JSON overhead
     bodyLimit({
-      maxSize: 7 * 1024 * 1024 + 1024,
+      maxSize: 28 * 1024 * 1024,
       onError: (c) => c.json({ error: "too_large", message: "Image is too large." }, 413),
     }),
     async (c) => {

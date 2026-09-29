@@ -2,17 +2,17 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { randomUUID } from "expo-crypto";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams, useNavigation } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Animated, Easing, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AmountField, Field, ItemEditor } from "../components/ItemEditor";
 import { ItemRow, TotalLine } from "../components/ItemRow";
 import { Button, Card, Divider, MerchantAvatar, Text } from "../components/ui";
-import { parseReceiptImage } from "../lib/api";
+import { parseReceiptParts } from "../lib/api";
 import { AuthError } from "../lib/auth";
 import { formatMoney } from "../lib/format";
 import { HttpError } from "../lib/http";
-import { prepareReceiptImage } from "../lib/image";
+import { prepareReceiptPages } from "../lib/image";
 import { draftFromExtraction, effectiveTotal, itemsTotal, saveDraft, totalsMismatch, validateDraft, type Draft } from "../lib/receipts";
 import type { ReceiptItem } from "../lib/types";
 import { radius, space, useTheme } from "../theme";
@@ -20,7 +20,7 @@ import { radius, space, useTheme } from "../theme";
 type State =
   | { phase: "processing" }
   | { phase: "error"; message: string; retryable: boolean }
-  | { phase: "ready"; draft: Draft; imageUri: string };
+  | { phase: "ready"; draft: Draft; pageUris: string[] };
 
 function errorMessage(error: unknown): { message: string; retryable: boolean } {
   if (error instanceof AuthError) return { message: error.message, retryable: false };
@@ -31,12 +31,21 @@ function errorMessage(error: unknown): { message: string; retryable: boolean } {
   return { message: "Something went wrong while reading the receipt.", retryable: true };
 }
 
-async function readReceipt(uri: string, width: number, height: number): Promise<State> {
+function parsePages(raw: string | undefined): string[] {
   try {
-    const image = await prepareReceiptImage(uri, width, height);
-    const extracted = await parseReceiptImage(image.base64, "image/jpeg");
+    const value = JSON.parse(raw ?? "[]");
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+async function readReceipt(pages: string[]): Promise<State> {
+  try {
+    const prepared = await prepareReceiptPages(pages.map((uri) => ({ uri })));
+    const extracted = await parseReceiptParts(prepared.parts);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    return { phase: "ready", draft: draftFromExtraction(extracted), imageUri: image.uri };
+    return { phase: "ready", draft: draftFromExtraction(extracted), pageUris: prepared.pageUris };
   } catch (error) {
     console.warn("Receipt processing failed", error);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -69,7 +78,8 @@ function ScanningPreview({ uri }: { uri: string }) {
 }
 
 export default function ReviewScreen() {
-  const params = useLocalSearchParams<{ uri: string; width: string; height: string }>();
+  const params = useLocalSearchParams<{ pages: string }>();
+  const pages = useMemo(() => parsePages(params.pages), [params.pages]);
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -81,14 +91,14 @@ export default function ReviewScreen() {
 
   const process = useCallback(() => {
     const run = ++attempt.current;
-    void readReceipt(params.uri, Number(params.width) || 0, Number(params.height) || 0).then((next) => {
+    void readReceipt(pages).then((next) => {
       if (run === attempt.current) setState(next); // ignore stale results (retry pressed, screen left)
     });
-  }, [params.uri, params.width, params.height]);
+  }, [pages]);
 
   useEffect(() => {
-    if (params.uri) process();
-  }, [params.uri, process]);
+    if (pages.length) process();
+  }, [pages, process]);
 
   // Ask before throwing away a reviewed-but-unsaved receipt.
   useEffect(() => {
@@ -102,7 +112,7 @@ export default function ReviewScreen() {
     });
   }, [navigation, state.phase]);
 
-  if (!params.uri) {
+  if (pages.length === 0) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
         <Text tone="muted">No photo to read.</Text>
@@ -113,11 +123,15 @@ export default function ReviewScreen() {
   if (state.phase === "processing") {
     return (
       <View style={[styles.center, { backgroundColor: colors.background, gap: space.xl }]}>
-        <ScanningPreview uri={params.uri} />
+        <ScanningPreview uri={pages[0]!} />
         <View style={{ gap: space.xs, alignItems: "center" }}>
-          <Text variant="headline">Reading your receipt…</Text>
+          <Text variant="headline">
+            {pages.length > 1 ? `Reading ${pages.length} parts…` : "Reading your receipt…"}
+          </Text>
           <Text tone="muted" style={{ textAlign: "center" }}>
-            Extracting every item and price. This usually takes a few seconds.
+            {pages.length > 1
+              ? "Joining the parts and extracting every item and price. Long receipts can take up to a minute."
+              : "Extracting every item and price. This usually takes a few seconds."}
           </Text>
         </View>
       </View>
@@ -155,7 +169,7 @@ export default function ReviewScreen() {
     );
   }
 
-  const { draft, imageUri } = state;
+  const { draft, pageUris } = state;
   const update = (patch: Partial<Draft>) => setState({ ...state, draft: { ...draft, ...patch } });
   const mismatch = totalsMismatch(draft);
 
@@ -179,7 +193,7 @@ export default function ReviewScreen() {
     if (problem) return Alert.alert("Check the receipt", problem);
     setSaving(true);
     try {
-      const id = await saveDraft(draft, imageUri);
+      const id = await saveDraft(draft, pageUris);
       saved.current = true;
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace({ pathname: "/receipt/[id]", params: { id } });

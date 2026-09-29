@@ -22,7 +22,7 @@ const receipt: Receipt = {
   total: 3,
   paymentMethod: null,
   notes: null,
-  imageUri: null,
+  imageUris: [],
   items: [{ id: "i1", name: "=HYPERLINK(\"x\")", quantity: 1, unitPrice: 3, totalPrice: 3, category: "dairy" }],
   createdAt: "2026-09-28T10:00:00.000Z",
   syncStatus: "pending",

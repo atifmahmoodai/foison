@@ -43,30 +43,40 @@ function setup(overrides: Partial<Parameters<typeof createApp>[0]> = {}) {
 describe("POST /v1/receipts/parse", () => {
   it("returns the extracted receipt", async () => {
     const { post, extract } = setup();
-    const res = await post({ imageBase64: PNG_1PX, mediaType: "image/png" });
+    const res = await post({ images: [{ imageBase64: PNG_1PX, mediaType: "image/png" }] });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ receipt });
-    expect(extract).toHaveBeenCalledWith({ imageBase64: PNG_1PX, mediaType: "image/png" });
+    expect(extract).toHaveBeenCalledWith({ images: [{ imageBase64: PNG_1PX, mediaType: "image/png" }] });
   });
 
   it("rejects missing or invalid tokens", async () => {
     const { app, post } = setup();
     expect((await app.request("/v1/receipts/parse", { method: "POST" })).status).toBe(401);
-    expect((await post({ imageBase64: PNG_1PX, mediaType: "image/png" }, "bad")).status).toBe(401);
+    expect((await post({ images: [{ imageBase64: PNG_1PX, mediaType: "image/png" }] }, "bad")).status).toBe(401);
   });
 
   it("validates the payload", async () => {
     const { post, extract } = setup();
-    expect((await post({ imageBase64: "data:image/png;base64,abc", mediaType: "image/png" })).status).toBe(400);
-    expect((await post({ imageBase64: PNG_1PX, mediaType: "image/gif" })).status).toBe(400);
+    expect((await post({ images: [{ imageBase64: "data:image/png;base64,abc", mediaType: "image/png" }] })).status).toBe(400);
+    expect((await post({ images: [{ imageBase64: PNG_1PX, mediaType: "image/gif" }] })).status).toBe(400);
+    expect((await post({ images: [] })).status).toBe(400);
+    const tooMany = Array.from({ length: 13 }, () => ({ imageBase64: PNG_1PX, mediaType: "image/png" }));
+    expect((await post({ images: tooMany })).status).toBe(400);
     expect((await post("not json")).status).toBe(400);
     expect(extract).not.toHaveBeenCalled();
   });
 
   it("rejects oversized bodies", async () => {
     const { post } = setup();
-    const res = await post({ imageBase64: "A".repeat(8 * 1024 * 1024), mediaType: "image/jpeg" });
+    const res = await post({ images: [{ imageBase64: "A".repeat(29 * 1024 * 1024), mediaType: "image/jpeg" }] });
     expect(res.status).toBe(413);
+  });
+
+  it("accepts a long receipt sent as several parts", async () => {
+    const { post, extract } = setup();
+    const parts = Array.from({ length: 5 }, () => ({ imageBase64: PNG_1PX, mediaType: "image/jpeg" as const }));
+    expect((await post({ images: parts })).status).toBe(200);
+    expect(extract).toHaveBeenCalledWith({ images: parts });
   });
 
   it("maps extraction errors to their status", async () => {
@@ -75,15 +85,15 @@ describe("POST /v1/receipts/parse", () => {
         throw new ExtractionError("nope", "not_a_receipt", 422);
       },
     });
-    const res = await post({ imageBase64: PNG_1PX, mediaType: "image/png" });
+    const res = await post({ images: [{ imageBase64: PNG_1PX, mediaType: "image/png" }] });
     expect(res.status).toBe(422);
     expect(await res.json()).toEqual({ error: "not_a_receipt", message: "nope" });
   });
 
   it("rate limits per user", async () => {
     const { post } = setup({ limiter: new RateLimiter(1, 60_000) });
-    expect((await post({ imageBase64: PNG_1PX, mediaType: "image/png" })).status).toBe(200);
-    const res = await post({ imageBase64: PNG_1PX, mediaType: "image/png" });
+    expect((await post({ images: [{ imageBase64: PNG_1PX, mediaType: "image/png" }] })).status).toBe(200);
+    const res = await post({ images: [{ imageBase64: PNG_1PX, mediaType: "image/png" }] });
     expect(res.status).toBe(429);
     expect(res.headers.get("retry-after")).toBe("60");
   });

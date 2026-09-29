@@ -72,12 +72,12 @@ export function validateDraft(draft: Draft): string | null {
 }
 
 /** Saves locally first (works offline), then syncs to Google Sheets in the background. */
-export async function saveDraft(draft: Draft, cacheImageUri: string | null): Promise<string> {
+export async function saveDraft(draft: Draft, cachePageUris: string[]): Promise<string> {
   const id = randomUUID();
-  let imageUri: string | null = null;
-  if (cacheImageUri) {
+  const imageUris: string[] = [];
+  for (const [page, uri] of cachePageUris.entries()) {
     try {
-      imageUri = persistReceiptImage(cacheImageUri, id);
+      imageUris.push(persistReceiptImage(uri, id, page));
     } catch (error) {
       console.warn("Could not keep receipt photo", error);
     }
@@ -92,7 +92,7 @@ export async function saveDraft(draft: Draft, cacheImageUri: string | null): Pro
     total: effectiveTotal(draft),
     paymentMethod: draft.paymentMethod?.trim() || null,
     notes: draft.notes?.trim() || null,
-    imageUri,
+    imageUris,
     items: draft.items.map((i) => ({ ...i, name: i.name.trim() })),
     createdAt: new Date().toISOString(),
     syncStatus: "pending",
@@ -101,7 +101,7 @@ export async function saveDraft(draft: Draft, cacheImageUri: string | null): Pro
   try {
     await insertReceipt(receipt);
   } catch (error) {
-    deleteReceiptImage(imageUri);
+    imageUris.forEach(deleteReceiptImage);
     throw error;
   }
   void syncReceipt(id);
@@ -111,5 +111,5 @@ export async function saveDraft(draft: Draft, cacheImageUri: string | null): Pro
 export async function removeReceipt(id: string): Promise<void> {
   const receipt = await getReceipt(id);
   await deleteReceipt(id);
-  deleteReceiptImage(receipt?.imageUri ?? null);
+  receipt?.imageUris.forEach(deleteReceiptImage);
 }

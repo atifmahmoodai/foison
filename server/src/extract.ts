@@ -4,6 +4,11 @@ import { ExtractedReceiptSchema, type ExtractedReceipt, type ParseRequest } from
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5";
 
+// Only the JSON schema is sent. The helper's auto-parse is dropped because it throws a generic error on
+// refusals and truncated output; parseReceipt() below handles those cases explicitly.
+const { type: formatType, schema: receiptJsonSchema } = betaZodOutputFormat(ExtractedReceiptSchema);
+const OUTPUT_FORMAT = { type: formatType, schema: receiptJsonSchema };
+
 const SYSTEM_PROMPT = `You read photos of shopping receipts (groceries, pharmacies, restaurants, fuel, retail) and return their contents as structured data.
 
 Rules:
@@ -15,10 +20,16 @@ Rules:
 - Copy subtotal, tax and total exactly as printed; do not "fix" them if they disagree with the item sum.
 - Dates: convert to YYYY-MM-DD. If the day/month order is ambiguous, use the store's country convention.
 - If a value is not printed or unreadable, use null rather than guessing, and mention it briefly in notes.
-- If the image is not a receipt, set is_receipt to false and return an empty items list.`;
+- If the image is not a receipt, set is_receipt to false and return an empty items list.
 
-// Parsed by hand rather than with messages.parse(): parse() throws a generic error on
-// refusals and truncated output, and we want to map those to user-facing messages.
+Long receipts arrive as several images in top-to-bottom order (separate photos, or slices of one tall photo).
+They are parts of ONE receipt:
+- Consecutive images usually overlap. A line that appears at the bottom of one image and again at the top
+  of the next is the same line: include it once. Use neighbouring lines and prices to line up the overlap.
+- Genuinely repeated purchases (the same item printed on two separate lines) must still be listed twice;
+  only remove duplicates caused by the overlap between images.
+- Take the header (store, date) from the first image and the totals/payment from the last.`;
+
 function parseReceipt(content: Anthropic.Beta.BetaContentBlock[]): ExtractedReceipt | null {
   const text = content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
   try {
@@ -42,29 +53,39 @@ export class ExtractionError extends Error {
 }
 
 export function createClaudeExtractor(client = new Anthropic()): ReceiptExtractor {
-  return async ({ imageBase64, mediaType }) => {
+  return async ({ images }) => {
+    const imageBlocks = images.flatMap((image, index): Anthropic.Beta.BetaContentBlockParam[] => [
+      ...(images.length > 1 ? [{ type: "text" as const, text: `Part ${index + 1} of ${images.length}:` }] : []),
+      { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.imageBase64 } },
+    ]);
     let response;
     try {
-      response = await client.beta.messages.create({
+      // Streamed so a very long receipt (hundreds of lines) has room to finish without an HTTP timeout.
+      response = await client.beta.messages
+        .stream({
         model: MODEL,
-        max_tokens: 16000,
+        max_tokens: 64000,
         betas: ["server-side-fallback-2026-07-01"],
         fallbacks: "default",
         output_config: {
-          effort: "medium",
-          format: betaZodOutputFormat(ExtractedReceiptSchema),
+          effort: "high",
+          format: OUTPUT_FORMAT,
         },
         system: SYSTEM_PROMPT,
         messages: [
           {
             role: "user",
             content: [
-              { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } },
-              { type: "text", text: "Extract this receipt." },
+              ...imageBlocks,
+              {
+                type: "text",
+                text: images.length > 1 ? `Extract this receipt (${images.length} parts, top to bottom).` : "Extract this receipt.",
+              },
             ],
           },
         ],
-      });
+      })
+        .finalMessage();
     } catch (error) {
       if (error instanceof Anthropic.RateLimitError) {
         throw new ExtractionError("The receipt reader is busy. Please try again in a moment.", "upstream", 503);

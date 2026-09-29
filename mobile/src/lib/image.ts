@@ -1,23 +1,62 @@
 import { Directory, File, Paths } from "expo-file-system";
-import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import { ImageManipulator, SaveFormat, type ImageManipulatorContext, type ImageRef } from "expo-image-manipulator";
+import { planPages, type Size } from "./tiling";
 
-/** Long edge in px. Claude downsizes larger images anyway; this keeps uploads ~300-700 KB. */
-const MAX_EDGE = 2000;
+export type Page = { uri: string };
+export type PreparedReceipt = {
+  /** Images to send, top to bottom (tiles of tall pages included). */
+  parts: { base64: string }[];
+  /** One resized JPEG per original page, kept as the receipt's photos. */
+  pageUris: string[];
+};
 
-export type PreparedImage = { uri: string; base64: string };
+const JPEG = { compress: 0.85, format: SaveFormat.JPEG } as const;
 
-export async function prepareReceiptImage(uri: string, width: number, height: number): Promise<PreparedImage> {
-  const context = ImageManipulator.manipulate(uri);
-  const longEdge = Math.max(width, height);
-  if (longEdge > MAX_EDGE) {
-    context.resize(width >= height ? { width: MAX_EDGE } : { height: MAX_EDGE });
+/** Decodes one image, runs `fn`, and always frees the native bitmap (12 MP photos are ~48 MB each). */
+async function withImage<T>(context: ImageManipulatorContext, fn: (ref: ImageRef) => Promise<T>): Promise<T> {
+  const ref = await context.renderAsync();
+  try {
+    return await fn(ref);
+  } finally {
+    ref.release();
+    context.release();
   }
-  const rendered = await context.renderAsync();
-  const result = await rendered.saveAsync({ base64: true, compress: 0.8, format: SaveFormat.JPEG });
-  context.release();
-  rendered.release();
-  if (!result.base64) throw new Error("Could not encode image");
-  return { uri: result.uri, base64: result.base64 };
+}
+
+/**
+ * Resizes each page and slices tall ones into overlapping tiles (see tiling.ts).
+ * Pages are processed one at a time so only one full-size photo is in memory at once.
+ */
+export async function prepareReceiptPages(pages: Page[]): Promise<PreparedReceipt> {
+  // Pass 1: measure. Rendering applies EXIF orientation, so these are the real upright sizes.
+  const sizes: Size[] = [];
+  for (const page of pages) {
+    sizes.push(await withImage(ImageManipulator.manipulate(page.uri), async (r) => ({ width: r.width, height: r.height })));
+  }
+  const plans = planPages(sizes);
+
+  // Pass 2: scale each page once, then cut tiles from the scaled file.
+  const parts: PreparedReceipt["parts"] = [];
+  const pageUris: string[] = [];
+  for (const [index, plan] of plans.entries()) {
+    const single = plan.tiles.length === 1;
+    const scaled = await withImage(ImageManipulator.manipulate(pages[index]!.uri).resize(plan.scaled), (r) =>
+      r.saveAsync({ ...JPEG, base64: single }),
+    );
+    pageUris.push(scaled.uri);
+    if (single) {
+      parts.push({ base64: scaled.base64! });
+      continue;
+    }
+    for (const tile of plan.tiles) {
+      const crop = { originX: 0, originY: tile.originY, width: plan.scaled.width, height: tile.height };
+      const saved = await withImage(ImageManipulator.manipulate(scaled.uri).crop(crop), (r) =>
+        r.saveAsync({ ...JPEG, base64: true }),
+      );
+      parts.push({ base64: saved.base64! });
+    }
+  }
+  return { parts, pageUris };
 }
 
 function receiptsDir(): Directory {
@@ -26,9 +65,9 @@ function receiptsDir(): Directory {
   return dir;
 }
 
-/** Copies the (cache) image into permanent app storage and returns the new URI. */
-export function persistReceiptImage(cacheUri: string, receiptId: string): string {
-  const target = new File(receiptsDir(), `${receiptId}.jpg`);
+/** Copies a (cache) page image into permanent app storage and returns the new URI. */
+export function persistReceiptImage(cacheUri: string, receiptId: string, page = 0): string {
+  const target = new File(receiptsDir(), page === 0 ? `${receiptId}.jpg` : `${receiptId}-${page + 1}.jpg`);
   if (target.exists) target.delete();
   new File(cacheUri).copySync(target);
   return target.uri;

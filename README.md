@@ -13,10 +13,17 @@ server/   Small Node API that reads receipt photos with Claude (keeps the API ke
 
 1. **Sign in with Google** (native Google Sign-In). The app asks only for the `drive.file` scope, so it can
    create and edit *its own* spreadsheet and never sees the user's other Drive files.
-2. **Scan**: the camera or photo library gives an image, which is resized on the device (≤ 2000 px, JPEG) and
-   sent to `POST /v1/receipts/parse` with the user's Google ID token.
+2. **Scan**: take one photo, or for a **long receipt** several photos top to bottom (up to 8), or pick
+   several from the library. On the device each photo is resized, and tall photos are sliced into
+   overlapping full-resolution sections (see `mobile/src/lib/tiling.ts`) so small print stays readable.
+   Claude reads images at up to 2576 px on the long edge, so one photo of a 60 cm receipt would otherwise be
+   shrunk to an unreadable ~400 px wide. All parts (max 12) go to `POST /v1/receipts/parse` in one request
+   with the user's Google ID token.
 3. **Server** verifies the token, rate-limits per user, and asks Claude (vision + structured JSON output)
    for merchant, date, currency, items (name, qty, unit price, line total, category), tax and total.
+   The parts are labelled in order and Claude is told to merge them and count lines that appear in two
+   overlapping parts only once. The reply is streamed with room for 64k output tokens, so receipts with
+   hundreds of lines are not cut off.
 4. **Review** shows every item and price immediately. Tap an item to fix it; a warning appears if the items
    don't add up to the printed total.
 5. **Save** writes to a local SQLite database first (works offline), then syncs to Google Sheets:

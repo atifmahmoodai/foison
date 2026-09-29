@@ -49,6 +49,11 @@ const MIGRATIONS: string[] = [
   CREATE INDEX receipt_items_receipt ON receipt_items (receipt_id, position);
   CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
   `,
+  // v2: long receipts can have several photos.
+  `
+  ALTER TABLE receipts ADD COLUMN image_uris TEXT NOT NULL DEFAULT '[]';
+  UPDATE receipts SET image_uris = json_array(image_uri) WHERE image_uri IS NOT NULL;
+  `,
 ];
 
 async function migrate(db: SQLite.SQLiteDatabase) {
@@ -74,7 +79,7 @@ type ReceiptRow = {
   total: number;
   payment_method: string | null;
   notes: string | null;
-  image_uri: string | null;
+  image_uris: string;
   created_at: string;
   sync_status: SyncStatus;
   sync_error: string | null;
@@ -89,6 +94,15 @@ type ItemRow = {
   category: string;
 };
 
+function parseUris(json: string): string[] {
+  try {
+    const value = JSON.parse(json);
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function toReceipt(row: ReceiptRow): Omit<Receipt, "items"> {
   return {
     id: row.id,
@@ -100,7 +114,7 @@ function toReceipt(row: ReceiptRow): Omit<Receipt, "items"> {
     total: row.total,
     paymentMethod: row.payment_method,
     notes: row.notes,
-    imageUri: row.image_uri,
+    imageUris: parseUris(row.image_uris),
     createdAt: row.created_at,
     syncStatus: row.sync_status,
     syncError: row.sync_error,
@@ -143,7 +157,7 @@ export async function insertReceipt(receipt: Receipt): Promise<void> {
   await db.withExclusiveTransactionAsync(async (txn) => {
     await txn.runAsync(
       `INSERT INTO receipts (id, merchant, purchase_date, currency, subtotal, tax, total, payment_method,
-         notes, image_uri, created_at, sync_status, sync_error)
+         notes, image_uris, created_at, sync_status, sync_error)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       receipt.id,
       receipt.merchant,
@@ -154,7 +168,7 @@ export async function insertReceipt(receipt: Receipt): Promise<void> {
       receipt.total,
       receipt.paymentMethod,
       receipt.notes,
-      receipt.imageUri,
+      JSON.stringify(receipt.imageUris),
       receipt.createdAt,
       receipt.syncStatus,
       receipt.syncError,

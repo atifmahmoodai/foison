@@ -41,7 +41,8 @@ export type Receipt = {
   total: number;
   paymentMethod: string | null;
   notes: string | null;
-  imageUri: string | null;
+  /** Photos of the receipt, top to bottom (several for long receipts). */
+  imageUris: string[];
   items: ReceiptItem[];
   createdAt: string; // ISO timestamp
   syncStatus: SyncStatus;

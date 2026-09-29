@@ -5,7 +5,7 @@ import SignInScreen from "../sign-in";
 
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn() },
-  useLocalSearchParams: () => ({ uri: "file:///cache/photo.jpg", width: "3000", height: "4000" }),
+  useLocalSearchParams: () => ({ pages: JSON.stringify(["file:///cache/top.jpg", "file:///cache/bottom.jpg"]) }),
   useNavigation: () => ({ addListener: () => () => {}, dispatch: jest.fn() }),
 }));
 jest.mock("react-native-safe-area-context", () => {
@@ -46,14 +46,17 @@ jest.mock("../../lib/useReceipts", () => ({
 }));
 jest.mock("../../lib/sync", () => ({ syncAllPending: jest.fn() }));
 jest.mock("../../lib/image", () => ({
-  prepareReceiptImage: jest.fn(async () => ({ uri: "file:///cache/small.jpg", base64: "AAAA" })),
+  prepareReceiptPages: jest.fn(async () => ({
+    parts: [{ base64: "AAAA" }, { base64: "BBBB" }, { base64: "CCCC" }],
+    pageUris: ["file:///cache/top-small.jpg", "file:///cache/bottom-small.jpg"],
+  })),
 }));
 jest.mock("../../lib/receipts", () => ({
   ...jest.requireActual("../../lib/receipts"),
   saveDraft: jest.fn(async () => "new-id"),
 }));
 jest.mock("../../lib/api", () => ({
-  parseReceiptImage: jest.fn(async () => ({
+  parseReceiptParts: jest.fn(async () => ({
     is_receipt: true,
     merchant: "Fresh Market",
     purchase_date: "2026-09-28",
@@ -86,7 +89,7 @@ it("renders the home dashboard with receipts and this month's total", async () =
   expect(screen.getByText("Scan receipt")).toBeTruthy();
 });
 
-it("shows every extracted item and price right after scanning, and saves", async () => {
+it("reads a multi-part receipt, shows every item and price, and saves all photos", async () => {
   await render(<ReviewScreen />);
 
   expect(await screen.findByText("Bananas")).toBeTruthy();
@@ -98,6 +101,11 @@ it("shows every extracted item and price right after scanning, and saves", async
   const { saveDraft } = jest.requireMock("../../lib/receipts");
   const { router } = jest.requireMock("expo-router");
   await fireEvent.press(screen.getByText("Save & add to Google Sheets"));
-  expect(saveDraft).toHaveBeenCalledWith(expect.objectContaining({ merchant: "Fresh Market" }), "file:///cache/small.jpg");
+  const { parseReceiptParts } = jest.requireMock("../../lib/api");
+  expect(parseReceiptParts).toHaveBeenCalledWith([{ base64: "AAAA" }, { base64: "BBBB" }, { base64: "CCCC" }]);
+  expect(saveDraft).toHaveBeenCalledWith(expect.objectContaining({ merchant: "Fresh Market" }), [
+    "file:///cache/top-small.jpg",
+    "file:///cache/bottom-small.jpg",
+  ]);
   expect(router.replace).toHaveBeenCalledWith({ pathname: "/receipt/[id]", params: { id: "new-id" } });
 });

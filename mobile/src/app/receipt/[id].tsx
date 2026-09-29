@@ -1,16 +1,17 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
-import { ActivityIndicator, Alert, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ItemRow, TotalLine } from "../../components/ItemRow";
+import { PhotoViewer } from "../../components/PhotoViewer";
 import { Button, Card, Divider, EmptyState, MerchantAvatar, SyncBadge, Text } from "../../components/ui";
 import { formatDate, formatMoney } from "../../lib/format";
 import { removeReceipt } from "../../lib/receipts";
 import { getSpreadsheetUrl } from "../../lib/sheets";
 import { syncReceipt } from "../../lib/sync";
 import { useReceipt } from "../../lib/useReceipts";
-import { radius, space, useTheme } from "../../theme";
+import { space, useTheme } from "../../theme";
 
 export default function ReceiptScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -121,8 +122,10 @@ export default function ReceiptScreen() {
         </Card>
 
         <View style={{ flexDirection: "row", gap: space.md }}>
-          {receipt.imageUri ? (
-            <Button title="View photo" icon="image-outline" variant="secondary" style={{ flex: 1 }} onPress={() => setPhotoOpen(true)} />
+          {receipt.imageUris.length > 0 ? (
+            <Button
+              title={receipt.imageUris.length > 1 ? `View ${receipt.imageUris.length} photos` : "View photo"}
+              icon="image-outline" variant="secondary" style={{ flex: 1 }} onPress={() => setPhotoOpen(true)} />
           ) : null}
           {receipt.syncStatus === "synced" ? (
             <Button title="Open Sheet" icon="open-outline" variant="secondary" style={{ flex: 1 }} onPress={() => void openSheet()} />
@@ -130,20 +133,7 @@ export default function ReceiptScreen() {
         </View>
       </ScrollView>
 
-      {receipt.imageUri ? (
-        <Modal visible={photoOpen} animationType="fade" onRequestClose={() => setPhotoOpen(false)}>
-          <View style={styles.photoModal}>
-            <Image source={{ uri: receipt.imageUri }} style={{ flex: 1 }} resizeMode="contain" />
-            <Pressable
-              accessibilityLabel="Close photo"
-              onPress={() => setPhotoOpen(false)}
-              style={[styles.close, { top: insets.top + space.md }]}
-            >
-              <Ionicons name="close" size={24} color="#fff" />
-            </Pressable>
-          </View>
-        </Modal>
-      ) : null}
+      <PhotoViewer uris={receipt.imageUris} visible={photoOpen} onClose={() => setPhotoOpen(false)} />
     </>
   );
 }
@@ -151,15 +141,4 @@ export default function ReceiptScreen() {
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   hero: { alignItems: "center", gap: space.xs, paddingVertical: space.md },
-  photoModal: { flex: 1, backgroundColor: "#000" },
-  close: {
-    position: "absolute",
-    right: space.lg,
-    width: 44,
-    height: 44,
-    borderRadius: radius.pill,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
 });
