@@ -53,7 +53,7 @@ async function createSpreadsheet(accessToken: string): Promise<string> {
   const response = await sheetsFetch(accessToken, "", {
     method: "POST",
     body: JSON.stringify({
-      properties: { title: "Tally Receipts" },
+      properties: { title: "Foison Receipts" },
       sheets: [
         {
           properties: { sheetId: RECEIPTS_SHEET_ID, title: "Receipts", gridProperties: { frozenRowCount: 1 } },

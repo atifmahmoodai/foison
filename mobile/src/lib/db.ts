@@ -6,7 +6,7 @@ let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
-    dbPromise = SQLite.openDatabaseAsync("tally.db").then(async (db) => {
+    dbPromise = SQLite.openDatabaseAsync("foison.db").then(async (db) => {
       await migrate(db);
       return db;
     });

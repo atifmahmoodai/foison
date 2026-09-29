@@ -1,6 +1,6 @@
-# Tally: receipt scanner for iOS & Android
+# Foison: receipt scanner for iOS & Android
 
-Snap a photo of any receipt (groceries, pharmacy, fuel, dining). Tally reads every line item and price,
+Snap a photo of any receipt (groceries, pharmacy, fuel, dining). Foison reads every line item and price,
 shows them to you right away for a quick review, then saves the receipt on the phone and adds it to a
 Google Sheet in the user's own Google Drive.
 
@@ -20,7 +20,7 @@ server/   Small Node API that reads receipt photos with Claude (keeps the API ke
 4. **Review** shows every item and price immediately. Tap an item to fix it; a warning appears if the items
    don't add up to the printed total.
 5. **Save** writes to a local SQLite database first (works offline), then syncs to Google Sheets:
-   - A spreadsheet named **Tally Receipts** is created on first sync, with two tabs:
+   - A spreadsheet named **Foison Receipts** is created on first sync, with two tabs:
      `Receipts` (one row per receipt) and `Items` (one row per item).
    - Both rows are written in one atomic `batchUpdate`, and the receipt ID is checked first, so retries
      never create duplicates.
@@ -55,8 +55,8 @@ npm test
 Deploy anywhere that runs Node 20+ or Docker (Fly.io, Railway, Render, Cloud Run):
 
 ```bash
-docker build -t tally-server ./server
-docker run -p 8787:8787 --env-file server/.env tally-server
+docker build -t foison-server ./server
+docker run -p 8787:8787 --env-file server/.env foison-server
 ```
 
 It must be served over **HTTPS** in production. The rate limiter is in-memory; if you run more than one

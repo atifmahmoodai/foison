@@ -45,7 +45,7 @@ export default function SignInScreen() {
           <Ionicons name="receipt-outline" size={34} color="#FFFFFF" />
         </LinearGradient>
         <Text variant="display" style={{ textAlign: "center" }}>
-          Tally
+          Foison
         </Text>
         <Text tone="muted" style={{ textAlign: "center", fontSize: 17 }}>
           Your receipts, itemised and organised.
@@ -71,7 +71,7 @@ export default function SignInScreen() {
       <View style={{ gap: space.md }}>
         <Button title="Continue with Google" icon="logo-google" onPress={onSignIn} loading={busy} />
         <Text tone="faint" variant="caption" style={{ textAlign: "center" }}>
-          Tally can only see the spreadsheet it creates, not your other Drive files.
+          Foison can only see the spreadsheet it creates, not your other Drive files.
         </Text>
       </View>
     </SafeAreaView>

@@ -8,22 +8,22 @@ const iosUrlScheme = iosClientId
   : "com.googleusercontent.apps.REPLACE_ME";
 
 const config: ExpoConfig = {
-  name: "Tally",
-  slug: "tally-receipts",
-  scheme: "tally",
+  name: "Foison",
+  slug: "foison-receipts",
+  scheme: "foison",
   version: "1.0.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
   ios: {
     supportsTablet: false,
-    bundleIdentifier: process.env.IOS_BUNDLE_ID ?? "com.example.tally",
+    bundleIdentifier: process.env.IOS_BUNDLE_ID ?? "com.example.foison",
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
     },
   },
   android: {
-    package: process.env.ANDROID_PACKAGE ?? "com.example.tally",
+    package: process.env.ANDROID_PACKAGE ?? "com.example.foison",
     adaptiveIcon: {
       backgroundColor: "#0B0F14",
       foregroundImage: "./assets/android-icon-foreground.png",
@@ -48,15 +48,15 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Tally uses the camera to photograph your receipts.",
+        cameraPermission: "Foison uses the camera to photograph your receipts.",
         recordAudioAndroid: false,
       },
     ],
     [
       "expo-image-picker",
       {
-        photosPermission: "Tally lets you import receipt photos from your library.",
-        cameraPermission: "Tally uses the camera to photograph your receipts.",
+        photosPermission: "Foison lets you import receipt photos from your library.",
+        cameraPermission: "Foison uses the camera to photograph your receipts.",
       },
     ],
     ["@react-native-google-signin/google-signin", { iosUrlScheme }],

@@ -82,7 +82,7 @@ export default function SettingsScreen() {
           <Button title="Open my spreadsheet" icon="open-outline" onPress={() => void Linking.openURL(sheetUrl)} />
         ) : (
           <Text variant="caption" tone="muted">
-            Your “Tally Receipts” spreadsheet is created in Google Drive when you save your first receipt.
+            Your “Foison Receipts” spreadsheet is created in Google Drive when you save your first receipt.
           </Text>
         )}
       </Card>

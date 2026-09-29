@@ -36,7 +36,7 @@ function PermissionGate({ canAskAgain, onRequest }: { canAskAgain: boolean; onRe
           Camera access needed
         </Text>
         <Text tone="muted" style={{ textAlign: "center" }}>
-          Tally uses your camera to photograph receipts. Photos stay on your device and are only sent to read the items.
+          Foison uses your camera to photograph receipts. Photos stay on your device and are only sent to read the items.
         </Text>
       </View>
       <View style={{ gap: space.sm }}>
