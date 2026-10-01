@@ -5,6 +5,15 @@ import { appendReceiptToSheet } from "./sheets";
 
 const inFlight = new Map<string, Promise<boolean>>();
 
+// All Sheets writes run one after another. Without this, two receipts syncing at the same moment on
+// first use could each create their own spreadsheet, and rows could be appended out of order.
+let queue: Promise<unknown> = Promise.resolve();
+function serialized<T>(task: () => Promise<T>): Promise<T> {
+  const run = queue.then(task, task);
+  queue = run.catch(() => {});
+  return run;
+}
+
 function describe(error: unknown): string {
   if (error instanceof AuthError) return error.message;
   if (error instanceof HttpError) {
@@ -20,7 +29,7 @@ function describe(error: unknown): string {
 export function syncReceipt(id: string): Promise<boolean> {
   const existing = inFlight.get(id);
   if (existing) return existing;
-  const task = (async () => {
+  const task = serialized(async () => {
     try {
       const receipt = await getReceipt(id);
       if (!receipt) return false;
@@ -35,14 +44,14 @@ export function syncReceipt(id: string): Promise<boolean> {
     } finally {
       inFlight.delete(id);
     }
-  })();
+  });
   inFlight.set(id, task);
   return task;
 }
 
 let syncAllTask: Promise<{ synced: number; failed: number }> | null = null;
 
-/** Syncs every pending/failed receipt, one at a time (keeps Sheets row order stable). */
+/** Syncs every pending/failed receipt, one at a time (keeps Sheets row order stable). Never rejects. */
 export function syncAllPending(): Promise<{ synced: number; failed: number }> {
   if (syncAllTask) return syncAllTask;
   syncAllTask = (async () => {
@@ -53,6 +62,8 @@ export function syncAllPending(): Promise<{ synced: number; failed: number }> {
         if (await syncReceipt(id)) synced++;
         else failed++;
       }
+    } catch (error) {
+      console.warn("Sync run failed", error);
     } finally {
       syncAllTask = null;
     }

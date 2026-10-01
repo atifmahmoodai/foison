@@ -1,10 +1,11 @@
 import { withGoogleTokens } from "./auth";
 import { getSetting, setSetting } from "./db";
 import { categoryLabel } from "./format";
-import { HttpError, isUnauthorized, readError, request } from "./http";
+import { isUnauthorized, readError, request } from "./http";
 import type { Receipt } from "./types";
 
 const SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets";
+const DRIVE_API = "https://www.googleapis.com/drive/v3/files";
 const SPREADSHEET_KEY = "spreadsheetId";
 
 // Fixed sheet IDs so appends keep working even if the user renames the tabs.
@@ -18,6 +19,7 @@ type Cell = { userEnteredValue?: { stringValue: string } | { numberValue: number
 
 const DATE_FORMAT = { numberFormat: { type: "DATE", pattern: "yyyy-mm-dd" } };
 const MONEY_FORMAT = { numberFormat: { type: "NUMBER", pattern: "#,##0.00" } };
+const DATETIME_FORMAT = { numberFormat: { type: "DATE_TIME", pattern: "yyyy-mm-dd hh:mm" } };
 
 // stringValue is always stored literally, so item names like "=HYPERLINK(...)" can't become formulas.
 const text = (value: string | null | undefined): Cell => (value ? { userEnteredValue: { stringValue: value } } : {});
@@ -31,10 +33,18 @@ function dateCell(iso: string): Cell {
   return Number.isFinite(serial) ? num(serial, DATE_FORMAT) : text(iso);
 }
 
-async function sheetsFetch(accessToken: string, path: string, init: RequestInit = {}): Promise<Response> {
+/** Local date and time as a Sheets serial, so the column sorts and filters as real dates. */
+function dateTimeCell(isoTimestamp: string): Cell {
+  const d = new Date(isoTimestamp);
+  if (Number.isNaN(d.getTime())) return text(isoTimestamp);
+  const localMs = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds());
+  return num((localMs - Date.UTC(1899, 11, 30)) / 86_400_000, DATETIME_FORMAT);
+}
+
+async function sheetsFetch(accessToken: string, path: string, init: { method?: string; body?: string } = {}): Promise<Response> {
   const response = await request(`${SHEETS_API}${path}`, {
     ...init,
-    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json", ...init.headers },
+    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
   });
   if (!response.ok) throw await readError(response, "Google Sheets request failed.");
   return response;
@@ -70,17 +80,25 @@ async function createSpreadsheet(accessToken: string): Promise<string> {
   return body.spreadsheetId;
 }
 
-/** Returns the app's spreadsheet, creating it (again) if it doesn't exist or was deleted/trashed. */
+/**
+ * True if the saved spreadsheet still exists and is not in the trash. Deleting a file in Drive only moves
+ * it to the trash, where the Sheets API still accepts writes, so we ask the Drive API (allowed by the
+ * drive.file scope for files the app created).
+ */
+async function spreadsheetUsable(accessToken: string, id: string): Promise<boolean> {
+  const response = await request(`${DRIVE_API}/${id}?fields=trashed`, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (response.status === 404) return false;
+  if (!response.ok) throw await readError(response, "Google Drive request failed.");
+  const body = (await response.json()) as { trashed?: boolean };
+  return body.trashed !== true;
+}
+
+/** Returns the app's spreadsheet, creating it (again) if it was deleted or moved to the trash. */
 async function ensureSpreadsheet(accessToken: string): Promise<string> {
   const saved = await getSetting(SPREADSHEET_KEY);
-  if (saved) {
-    try {
-      await sheetsFetch(accessToken, `/${saved}?fields=spreadsheetId`);
-      return saved;
-    } catch (error) {
-      if (!(error instanceof HttpError) || (error.status !== 404 && error.status !== 403)) throw error;
-    }
-  }
+  if (saved && (await spreadsheetUsable(accessToken, saved))) return saved;
   const id = await createSpreadsheet(accessToken);
   await setSetting(SPREADSHEET_KEY, id);
   return id;
@@ -107,7 +125,7 @@ function receiptRow(r: Receipt) {
       text(r.currency),
       text(r.paymentMethod),
       text(r.notes),
-      text(new Date(r.createdAt).toLocaleString()),
+      dateTimeCell(r.createdAt),
     ],
   };
 }

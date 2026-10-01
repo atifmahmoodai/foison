@@ -57,8 +57,13 @@ export default function ReceiptScreen() {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
-            await removeReceipt(receipt.id);
-            router.back();
+            try {
+              await removeReceipt(receipt.id);
+              router.back();
+            } catch (error) {
+              console.warn("Delete failed", error);
+              Alert.alert("Couldn't delete", "Something went wrong. Please try again.");
+            }
           },
         },
       ],

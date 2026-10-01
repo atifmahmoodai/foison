@@ -26,3 +26,20 @@ export class RateLimiter {
     for (const [key, entry] of this.hits) if (entry.resetAt <= now) this.hits.delete(key);
   }
 }
+
+/** Caps how many Claude calls run at once, so a burst of users can't exhaust API rate limits or cost. */
+export class ConcurrencyLimiter {
+  private active = 0;
+  constructor(private readonly max: number) {}
+
+  tryAcquire(): (() => void) | null {
+    if (this.active >= this.max) return null;
+    this.active += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.active -= 1;
+    };
+  }
+}

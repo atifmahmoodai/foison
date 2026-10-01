@@ -91,9 +91,12 @@ export default function HomeScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await syncAllPending();
-    await reload();
-    setRefreshing(false);
+    try {
+      await syncAllPending();
+      await reload();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const firstName = user?.givenName ?? user?.name?.split(" ")[0] ?? "";

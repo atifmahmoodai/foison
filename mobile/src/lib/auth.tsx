@@ -20,6 +20,8 @@ type AuthContextValue = {
   user: User["user"] | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  /** Erases all local data and revokes the app's Google access. The user's spreadsheet stays in their Drive. */
+  deleteAllData: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -40,7 +42,7 @@ export class AuthError extends Error {}
 /** Sign-in error codes that mean the user simply backed out. */
 export function isCancellation(error: unknown): boolean {
   const code = (error as { code?: string } | null)?.code;
-  return code === statusCodes.SIGN_IN_CANCELLED;
+  return code === statusCodes.SIGN_IN_CANCELLED || code === statusCodes.IN_PROGRESS;
 }
 
 async function handleSignedIn(response: SignInResponse): Promise<User | null> {
@@ -99,12 +101,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await GoogleSignin.signOut();
+    try {
+      await GoogleSignin.signOut();
+    } catch (error) {
+      console.warn("Google sign-out failed", error); // still sign out locally
+    }
     setUser(null);
     setStatus("signedOut");
   }, []);
 
-  const value = useMemo(() => ({ status, user, signIn, signOut }), [status, user, signIn, signOut]);
+  const deleteAllData = useCallback(async () => {
+    await clearAllData();
+    deleteAllReceiptImages();
+    try {
+      await GoogleSignin.revokeAccess();
+    } catch (error) {
+      console.warn("Revoking Google access failed", error);
+    }
+    await signOut();
+  }, [signOut]);
+
+  const value = useMemo(
+    () => ({ status, user, signIn, signOut, deleteAllData }),
+    [status, user, signIn, signOut, deleteAllData],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

@@ -40,20 +40,21 @@ function parseReceipt(content: Anthropic.Beta.BetaContentBlock[]): ExtractedRece
   }
 }
 
-export type ReceiptExtractor = (input: ParseRequest) => Promise<ExtractedReceipt>;
+/** `signal` aborts the Claude call, e.g. when the phone cancels or disconnects. */
+export type ReceiptExtractor = (input: ParseRequest, signal?: AbortSignal) => Promise<ExtractedReceipt>;
 
 export class ExtractionError extends Error {
   constructor(
     message: string,
-    readonly code: "refused" | "unparseable" | "not_a_receipt" | "upstream",
-    readonly status: 422 | 502 | 503,
+    readonly code: "refused" | "unparseable" | "not_a_receipt" | "upstream" | "cancelled",
+    readonly status: 400 | 422 | 502 | 503,
   ) {
     super(message);
   }
 }
 
 export function createClaudeExtractor(client = new Anthropic()): ReceiptExtractor {
-  return async ({ images }) => {
+  return async ({ images }, signal) => {
     const imageBlocks = images.flatMap((image, index): Anthropic.Beta.BetaContentBlockParam[] => [
       ...(images.length > 1 ? [{ type: "text" as const, text: `Part ${index + 1} of ${images.length}:` }] : []),
       { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.imageBase64 } },
@@ -84,9 +85,12 @@ export function createClaudeExtractor(client = new Anthropic()): ReceiptExtracto
             ],
           },
         ],
-      })
+      }, { signal })
         .finalMessage();
     } catch (error) {
+      if (signal?.aborted || error instanceof Anthropic.APIUserAbortError) {
+        throw new ExtractionError("Cancelled.", "cancelled", 400); // the client is already gone
+      }
       if (error instanceof Anthropic.RateLimitError) {
         throw new ExtractionError("The receipt reader is busy. Please try again in a moment.", "upstream", 503);
       }

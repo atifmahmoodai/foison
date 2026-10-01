@@ -11,8 +11,8 @@ import { Button, Card, Divider, MerchantAvatar, Text } from "../components/ui";
 import { parseReceiptParts } from "../lib/api";
 import { AuthError } from "../lib/auth";
 import { formatMoney } from "../lib/format";
-import { HttpError } from "../lib/http";
-import { prepareReceiptPages } from "../lib/image";
+import { CancelledError, HttpError } from "../lib/http";
+import { deleteCacheFiles, prepareReceiptPages } from "../lib/image";
 import { draftFromExtraction, effectiveTotal, itemsTotal, saveDraft, totalsMismatch, validateDraft, type Draft } from "../lib/receipts";
 import type { ReceiptItem } from "../lib/types";
 import { radius, space, useTheme } from "../theme";
@@ -40,13 +40,17 @@ function parsePages(raw: string | undefined): string[] {
   }
 }
 
-async function readReceipt(pages: string[]): Promise<State> {
+/** Returns null if cancelled. Resized pages are reported via onPrepared so they can be cleaned up. */
+async function readReceipt(pages: string[], signal: AbortSignal, onPrepared: (uris: string[]) => void): Promise<State | null> {
   try {
     const prepared = await prepareReceiptPages(pages.map((uri) => ({ uri })));
-    const extracted = await parseReceiptParts(prepared.parts);
+    onPrepared(prepared.pageUris);
+    if (signal.aborted) return null;
+    const extracted = await parseReceiptParts(prepared.parts, signal);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     return { phase: "ready", draft: draftFromExtraction(extracted), pageUris: prepared.pageUris };
   } catch (error) {
+    if (error instanceof CancelledError || signal.aborted) return null;
     console.warn("Receipt processing failed", error);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     return { phase: "error", ...errorMessage(error) };
@@ -87,18 +91,31 @@ export default function ReviewScreen() {
   const [editing, setEditing] = useState<{ item: ReceiptItem | null; index: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const saved = useRef(false);
-  const attempt = useRef(0);
+  const inFlight = useRef<AbortController | null>(null);
+  const tempFiles = useRef(new Set<string>());
 
   const process = useCallback(() => {
-    const run = ++attempt.current;
-    void readReceipt(pages).then((next) => {
-      if (run === attempt.current) setState(next); // ignore stale results (retry pressed, screen left)
+    inFlight.current?.abort();
+    const controller = new AbortController();
+    inFlight.current = controller;
+    void readReceipt(pages, controller.signal, (uris) => uris.forEach((u) => tempFiles.current.add(u))).then((next) => {
+      if (next && !controller.signal.aborted) setState(next);
     });
   }, [pages]);
 
   useEffect(() => {
     if (pages.length) process();
   }, [pages, process]);
+
+  // Leaving the screen cancels the upload (the server then stops the Claude call too) and removes
+  // temporary images. Saved receipts already have their own copies in app storage.
+  useEffect(() => {
+    const files = tempFiles.current;
+    return () => {
+      inFlight.current?.abort();
+      deleteCacheFiles([...pages, ...files]);
+    };
+  }, [pages]);
 
   // Ask before throwing away a reviewed-but-unsaved receipt.
   useEffect(() => {
@@ -134,6 +151,7 @@ export default function ReviewScreen() {
               : "Extracting every item and price. This usually takes a few seconds."}
           </Text>
         </View>
+        <Button title="Cancel" variant="ghost" onPress={() => router.back()} />
       </View>
     );
   }

@@ -8,21 +8,37 @@ export class HttpError extends Error {
   }
 }
 
+/** The user cancelled (e.g. left the screen); not an error to show. */
+export class CancelledError extends Error {
+  constructor() {
+    super("Cancelled");
+  }
+}
+
 export function isUnauthorized(error: unknown): boolean {
   return error instanceof HttpError && error.status === 401;
 }
 
-/** fetch with a timeout and friendly network errors. */
-export async function request(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<Response> {
+/** fetch with a timeout, cancellation and friendly network errors. */
+export async function request(
+  url: string,
+  init: Omit<RequestInit, "signal"> & { timeoutMs?: number; signal?: AbortSignal } = {},
+): Promise<Response> {
+  const { timeoutMs = 30_000, signal, ...rest } = init;
+  if (signal?.aborted) throw new CancelledError();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), init.timeoutMs ?? 30_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onCancel = () => controller.abort();
+  signal?.addEventListener("abort", onCancel);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fetch(url, { ...rest, signal: controller.signal });
   } catch {
+    if (signal?.aborted) throw new CancelledError();
     if (controller.signal.aborted) throw new HttpError(0, "The request timed out. Check your connection and try again.");
     throw new HttpError(0, "You appear to be offline. Check your connection and try again.");
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", onCancel);
   }
 }
 

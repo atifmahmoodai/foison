@@ -32,7 +32,7 @@ export const ExtractedReceiptSchema = z.object({
   is_receipt: z.boolean().describe("False when the image is not a purchase receipt or is unreadable"),
   merchant: z.string().nullable(),
   purchase_date: z.string().nullable().describe("ISO date YYYY-MM-DD, null if not printed"),
-  currency: z.string().describe("ISO 4217 code, inferred from symbols/country; USD if unknown"),
+  currency: z.string().nullable().describe("ISO 4217 code, inferred from symbols, address or country; null if it cannot be determined"),
   items: z.array(ReceiptItemSchema),
   subtotal: z.number().nullable(),
   tax: z.number().nullable(),

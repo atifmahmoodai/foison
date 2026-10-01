@@ -1,4 +1,5 @@
 import { randomUUID } from "expo-crypto";
+import { getLocales } from "expo-localization";
 import { deleteReceipt, getReceipt, insertReceipt } from "./db";
 import { isValidIsoDate, roundMoney, sumMoney, todayIso } from "./format";
 import { deleteReceiptImage, persistReceiptImage } from "./image";
@@ -20,8 +21,20 @@ function normalizeCategory(value: string): Category {
   return (CATEGORIES as readonly string[]).includes(value) ? (value as Category) : "other";
 }
 
+/** The phone's currency (e.g. PKR in Pakistan), used when the receipt doesn't show one. */
+export function deviceCurrency(): string {
+  try {
+    const code = getLocales()[0]?.currencyCode?.toUpperCase();
+    if (code && /^[A-Z]{3}$/.test(code)) return code;
+  } catch {
+    // fall through
+  }
+  return "USD";
+}
+
 export function draftFromExtraction(x: ExtractedReceipt): Draft {
-  const currency = /^[A-Z]{3}$/.test(x.currency?.toUpperCase() ?? "") ? x.currency.toUpperCase() : "USD";
+  const printed = x.currency?.trim().toUpperCase() ?? "";
+  const currency = /^[A-Z]{3}$/.test(printed) ? printed : deviceCurrency();
   return {
     merchant: x.merchant?.trim() || "Unknown store",
     purchaseDate: x.purchase_date && isValidIsoDate(x.purchase_date) ? x.purchase_date : todayIso(),

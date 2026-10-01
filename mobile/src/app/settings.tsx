@@ -21,7 +21,7 @@ function InfoRow({ icon, label, value }: { icon: IconName; label: string; value:
 }
 
 export default function SettingsScreen() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, deleteAllData } = useAuth();
   const { colors } = useTheme();
   const { receipts } = useReceiptList();
   const [sheetUrl, setSheetUrl] = useState<string | null>(null);
@@ -52,8 +52,27 @@ export default function SettingsScreen() {
       ],
     );
 
+  const confirmDeleteAll = () =>
+    Alert.alert(
+      "Delete all data?",
+      "This permanently deletes every receipt and photo on this device and disconnects Foison from your Google account. " +
+        "Your “Foison Receipts” spreadsheet stays in your Google Drive; delete it there if you want.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete everything",
+          style: "destructive",
+          onPress: () =>
+            void deleteAllData().catch((error) => {
+              console.warn("Delete all failed", error);
+              Alert.alert("Couldn't delete", "Something went wrong. Please try again.");
+            }),
+        },
+      ],
+    );
+
   return (
-    <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={{ padding: space.lg, gap: space.lg }}>
+    <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={{ padding: space.lg, gap: space.lg, paddingBottom: space.xxl * 2 }}>
       <Card style={styles.account}>
         {user?.photo ? (
           <Image source={{ uri: user.photo }} style={styles.photo} />
@@ -99,7 +118,8 @@ export default function SettingsScreen() {
         </Text>
       </Card>
 
-      <Button title="Sign out" variant="danger" icon="log-out-outline" onPress={confirmSignOut} />
+      <Button title="Sign out" variant="secondary" icon="log-out-outline" onPress={confirmSignOut} />
+      <Button title="Delete all my data" variant="danger" icon="trash-outline" onPress={confirmDeleteAll} />
     </ScrollView>
   );
 }

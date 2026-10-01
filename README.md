@@ -66,8 +66,18 @@ docker build -t foison-server ./server
 docker run -p 8787:8787 --env-file server/.env foison-server
 ```
 
-It must be served over **HTTPS** in production. The rate limiter is in-memory; if you run more than one
-instance, move it to Redis.
+It must be served over **HTTPS** in production.
+
+- **Request timeout:** reading a long receipt can take 1–2 minutes. Set your host's request timeout to at
+  least 300 s (Cloud Run: `--timeout=300`; Render/Railway/Fly: the defaults are fine; avoid hosts that cap
+  requests at 30 s).
+- **Cost protection:** any Google account can sign in, so the server caps scans per user per hour
+  (`SCANS_PER_HOUR`, default 30) and per day (`SCANS_PER_DAY`, default 100), and limits simultaneous Claude
+  calls (`MAX_CONCURRENT_SCANS`, default 20). Also set a monthly spend limit in the Anthropic Console.
+- **Cancelling:** if the user cancels or closes the app mid-scan, the server stops the Claude call.
+- **Scaling:** the limits are in-memory. If you run more than one instance, move them to Redis.
+- Logs are one JSON line per request (request ID, path, status, latency). Receipt images are never logged
+  or stored.
 
 ### 3. Mobile app
 
@@ -100,7 +110,11 @@ npm run typecheck && npm run lint && npm test
 3. `npx eas-cli@latest submit --platform ios` / `--platform android`
 4. Replace the placeholder icon and splash images in `mobile/assets/` with your brand.
 5. Publish a privacy policy. Receipt photos are sent to your server and to Anthropic for processing; the
-   server does not store them.
+   server does not store them. Settings → **Delete all my data** erases everything on the device and
+   revokes Google access (App Store reviewers look for an in-app way to delete data).
+6. **Sign in with Apple:** App Store guideline 4.8 requires it when an app offers third-party sign-in,
+   unless the login is only used to access that service's own content. Foison uses Google sign-in to write
+   to the user's Google Drive, which fits that exception, but mention it in your App Review notes.
 
 ## Project layout
 

@@ -10,6 +10,7 @@ jest.mock("../image", () => ({
   deleteReceiptImage: jest.fn(),
 }));
 jest.mock("../sync", () => ({ syncReceipt: jest.fn(() => Promise.resolve(true)) }));
+jest.mock("expo-localization", () => ({ getLocales: () => [{ currencyCode: "PKR" }] }));
 jest.mock("expo-crypto", () => {
   let n = 0;
   return { randomUUID: () => `id-${++n}` };
@@ -39,6 +40,11 @@ describe("draftFromExtraction", () => {
     expect(draft.merchant).toBe("Fresh Market");
     expect(draft.currency).toBe("USD");
     expect(draft.items[2]).toMatchObject({ quantity: 1, category: "other" });
+  });
+
+  it("uses the phone's currency when the receipt doesn't show one", () => {
+    expect(draftFromExtraction({ ...extracted, currency: null }).currency).toBe("PKR");
+    expect(draftFromExtraction({ ...extracted, currency: "Rs" }).currency).toBe("PKR");
   });
 
   it("falls back to today for missing/invalid dates", () => {

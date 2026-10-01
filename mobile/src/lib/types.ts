@@ -56,7 +56,7 @@ export type ExtractedReceipt = {
   is_receipt: boolean;
   merchant: string | null;
   purchase_date: string | null;
-  currency: string;
+  currency: string | null;
   items: {
     name: string;
     quantity: number;

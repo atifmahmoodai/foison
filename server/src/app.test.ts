@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { ExtractionError } from "./extract.js";
-import { RateLimiter } from "./rateLimit.js";
+import { ConcurrencyLimiter, RateLimiter } from "./rateLimit.js";
 import type { ExtractedReceipt } from "./schema.js";
 
 const receipt: ExtractedReceipt = {
@@ -29,6 +29,8 @@ function setup(overrides: Partial<Parameters<typeof createApp>[0]> = {}) {
     },
     extract,
     limiter: new RateLimiter(100, 60_000),
+    dailyLimiter: new RateLimiter(1000, 86_400_000),
+    concurrency: new ConcurrencyLimiter(10),
     ...overrides,
   });
   const post = (body: unknown, token = "good") =>
@@ -46,7 +48,7 @@ describe("POST /v1/receipts/parse", () => {
     const res = await post({ images: [{ imageBase64: PNG_1PX, mediaType: "image/png" }] });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ receipt });
-    expect(extract).toHaveBeenCalledWith({ images: [{ imageBase64: PNG_1PX, mediaType: "image/png" }] });
+    expect(extract).toHaveBeenCalledWith({ images: [{ imageBase64: PNG_1PX, mediaType: "image/png" }] }, expect.any(AbortSignal));
   });
 
   it("rejects missing or invalid tokens", async () => {
@@ -76,7 +78,7 @@ describe("POST /v1/receipts/parse", () => {
     const { post, extract } = setup();
     const parts = Array.from({ length: 5 }, () => ({ imageBase64: PNG_1PX, mediaType: "image/jpeg" as const }));
     expect((await post({ images: parts })).status).toBe(200);
-    expect(extract).toHaveBeenCalledWith({ images: parts });
+    expect(extract).toHaveBeenCalledWith({ images: parts }, expect.any(AbortSignal));
   });
 
   it("maps extraction errors to their status", async () => {
@@ -96,6 +98,43 @@ describe("POST /v1/receipts/parse", () => {
     const res = await post({ images: [{ imageBase64: PNG_1PX, mediaType: "image/png" }] });
     expect(res.status).toBe(429);
     expect(res.headers.get("retry-after")).toBe("60");
+  });
+});
+
+describe("cost protection", () => {
+  const body = { images: [{ imageBase64: PNG_1PX, mediaType: "image/png" }] };
+
+  it("enforces a daily cap per user", async () => {
+    const { post } = setup({ dailyLimiter: new RateLimiter(2, 86_400_000) });
+    expect((await post(body)).status).toBe(200);
+    expect((await post(body)).status).toBe(200);
+    const res = await post(body);
+    expect(res.status).toBe(429);
+    expect((await res.json()).message).toMatch(/today/);
+  });
+
+  it("returns 503 when too many scans run at once, and frees the slot afterwards", async () => {
+    let finish!: () => void;
+    const slow = vi
+      .fn<() => Promise<typeof receipt>>()
+      .mockImplementationOnce(() => new Promise((resolve) => (finish = () => resolve(receipt))))
+      .mockResolvedValue(receipt);
+    const { post } = setup({ extract: slow, concurrency: new ConcurrencyLimiter(1) });
+    const first = post(body);
+    await vi.waitFor(() => expect(slow).toHaveBeenCalled());
+    expect((await post(body)).status).toBe(503);
+    finish();
+    expect((await first).status).toBe(200);
+    expect((await post(body)).status).toBe(200);
+  });
+
+  it("frees the slot when extraction fails", async () => {
+    const failing = vi.fn(async () => {
+      throw new ExtractionError("bad", "unparseable", 422);
+    });
+    const { post } = setup({ extract: failing, concurrency: new ConcurrencyLimiter(1) });
+    expect((await post(body)).status).toBe(422);
+    expect((await post(body)).status).toBe(422);
   });
 });
 

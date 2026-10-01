@@ -46,6 +46,7 @@ jest.mock("../../lib/useReceipts", () => ({
 }));
 jest.mock("../../lib/sync", () => ({ syncAllPending: jest.fn() }));
 jest.mock("../../lib/image", () => ({
+  deleteCacheFiles: jest.fn(),
   prepareReceiptPages: jest.fn(async () => ({
     parts: [{ base64: "AAAA" }, { base64: "BBBB" }, { base64: "CCCC" }],
     pageUris: ["file:///cache/top-small.jpg", "file:///cache/bottom-small.jpg"],
@@ -102,10 +103,35 @@ it("reads a multi-part receipt, shows every item and price, and saves all photos
   const { router } = jest.requireMock("expo-router");
   await fireEvent.press(screen.getByText("Save & add to Google Sheets"));
   const { parseReceiptParts } = jest.requireMock("../../lib/api");
-  expect(parseReceiptParts).toHaveBeenCalledWith([{ base64: "AAAA" }, { base64: "BBBB" }, { base64: "CCCC" }]);
+  expect(parseReceiptParts).toHaveBeenCalledWith(
+    [{ base64: "AAAA" }, { base64: "BBBB" }, { base64: "CCCC" }],
+    expect.any(AbortSignal),
+  );
   expect(saveDraft).toHaveBeenCalledWith(expect.objectContaining({ merchant: "Fresh Market" }), [
     "file:///cache/top-small.jpg",
     "file:///cache/bottom-small.jpg",
   ]);
   expect(router.replace).toHaveBeenCalledWith({ pathname: "/receipt/[id]", params: { id: "new-id" } });
+});
+
+it("cancel stops the upload, leaves the screen and deletes temporary photos", async () => {
+  const { parseReceiptParts } = jest.requireMock("../../lib/api");
+  const { deleteCacheFiles } = jest.requireMock("../../lib/image");
+  const { router } = jest.requireMock("expo-router");
+  let seenSignal: AbortSignal | undefined;
+  parseReceiptParts.mockImplementationOnce(
+    (_parts: unknown, signal: AbortSignal) => new Promise(() => void (seenSignal = signal)), // never resolves
+  );
+  deleteCacheFiles.mockClear();
+
+  const view = await render(<ReviewScreen />);
+  expect(screen.getByText("Reading 2 parts…")).toBeTruthy();
+  await fireEvent.press(screen.getByText("Cancel"));
+  expect(router.back).toHaveBeenCalled();
+
+  await view.unmount();
+  expect(seenSignal?.aborted).toBe(true);
+  expect(deleteCacheFiles).toHaveBeenCalledWith(
+    expect.arrayContaining(["file:///cache/top.jpg", "file:///cache/bottom.jpg", "file:///cache/top-small.jpg"]),
+  );
 });

@@ -123,4 +123,23 @@ describe("createClaudeExtractor", () => {
     });
     await expect(createClaudeExtractor(client)(one)).rejects.toMatchObject({ code: "upstream", status: 502 });
   });
+
+  it("stops the Claude call when the request is aborted", async () => {
+    let seenSignal: AbortSignal | undefined;
+    const client = new Anthropic({
+      apiKey: "test",
+      maxRetries: 0,
+      fetch: (_url, init) =>
+        new Promise((_resolve, reject) => {
+          seenSignal = init?.signal ?? undefined;
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        }),
+    });
+    const controller = new AbortController();
+    const pending = createClaudeExtractor(client)(one, controller.signal);
+    await new Promise((r) => setTimeout(r, 10));
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: "cancelled" });
+    expect(seenSignal?.aborted).toBe(true);
+  });
 });

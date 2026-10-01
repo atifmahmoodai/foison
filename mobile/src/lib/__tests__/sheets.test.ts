@@ -90,3 +90,26 @@ it("surfaces Google errors", async () => {
   mockFetch(() => ({ status: 500, body: { error: { code: 500, message: "backend error", status: "INTERNAL" } } }));
   await expect(appendReceiptToSheet(receipt)).rejects.toMatchObject({ status: 500, message: "backend error" });
 });
+
+it("starts a new spreadsheet if the old one was moved to the trash", async () => {
+  mockSettings.set("spreadsheetId", "OLD");
+  mockFetch((c) => {
+    if (c.url.includes("/drive/v3/files/OLD")) return { status: 200, body: { trashed: true } };
+    if (c.method === "POST" && c.url.endsWith("/spreadsheets")) return { status: 200, body: { spreadsheetId: "NEW" } };
+    return { status: 200, body: {} };
+  });
+  await appendReceiptToSheet(receipt);
+  expect(mockSettings.get("spreadsheetId")).toBe("NEW");
+  expect(calls.some((c) => c.url.includes("/NEW:batchUpdate"))).toBe(true);
+  expect(calls.some((c) => c.url.includes("/OLD:batchUpdate"))).toBe(false);
+});
+
+it("stores the scan time as a real date-time value", async () => {
+  mockSettings.set("spreadsheetId", "S1");
+  mockFetch(() => ({ status: 200, body: {} }));
+  await appendReceiptToSheet(receipt);
+  const batch = calls.find((c) => c.url.endsWith("/S1:batchUpdate"))!;
+  const scannedAt = batch.body.requests[0].appendCells.rows[0].values[10];
+  expect(scannedAt.userEnteredValue.numberValue).toBeGreaterThan(46000);
+  expect(scannedAt.userEnteredFormat.numberFormat.type).toBe("DATE_TIME");
+});

@@ -54,9 +54,27 @@ export async function prepareReceiptPages(pages: Page[]): Promise<PreparedReceip
         r.saveAsync({ ...JPEG, base64: true }),
       );
       parts.push({ base64: saved.base64! });
+      deleteCacheFiles([saved.uri]); // only the base64 is needed
     }
   }
   return { parts, pageUris };
+}
+
+/**
+ * Deletes temporary images (camera captures, picker copies, resized pages). Only touches files inside the
+ * app's cache directory, so it can never remove a user's original photo or a saved receipt image.
+ */
+export function deleteCacheFiles(uris: string[]) {
+  const cacheRoot = Paths.cache.uri;
+  for (const uri of uris) {
+    if (!uri.startsWith(cacheRoot)) continue;
+    try {
+      const file = new File(uri);
+      if (file.exists) file.delete();
+    } catch (error) {
+      console.warn("Failed to delete temp image", error);
+    }
+  }
 }
 
 function receiptsDir(): Directory {
